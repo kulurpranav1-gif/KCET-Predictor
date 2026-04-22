@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import supabase from "./supabase";
 
 const categoryOptions = ["GM", "GMK", "GMR", "1G", "1K", "1R", "2AG", "2AK", "2AR", "2BG", "2BK", "2BR", "3AG", "3AK", "3AR", "3BG", "3BK", "3BR", "SCG", "SCK", "SCR", "STG", "STK", "STR"];
@@ -397,6 +398,7 @@ export default function App() {
           ) : null}
         </section>
       </div>
+      <SpeedInsights />
     </main>
   );
 }
