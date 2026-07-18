@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Department Timetable</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-image: url('university_logo.png');
+            background-repeat: no-repeat;
+            background-position: center;
+            background-size: 300px;
+            background-attachment: fixed;
+            background-color: #f4f4f4;
+        }
+
+        header {
+            background-color: navy;
+            color: white;
+            text-align: center;
+            padding: 15px;
+        }
+
+        footer {
+            background-color: navy;
+            color: white;
+            text-align: center;
+            padding: 10px;
+            margin-top: 20px;
+        }
+
+        table {
+            width: 90%;
+            margin: auto;
+            border-collapse: collapse;
+            background-color: rgba(255,255,255,0.9);
+        }
+
+        th, td {
+            border: 2px solid black;
+            padding: 10px;
+            text-align: center;
+        }
+
+        th {
+            background-color: lightblue;
+        }
+
+        .info {
+            width: 90%;
+            margin: auto;
+        }
+    </style>
+</head>
+
+<body>
+
+<header>
+    <h1>Department of Computer Science & Engineering</h1>
+    <h2>Class Timetable - V Semester</h2>
+</header>
+
+<div class="info">
+    <h3>Course Details</h3>
+    <ul>
+        <li><b>CS501</b> - Data Structures and Algorithms</li>
+        <li><b>CS502</b> - Database Management Systems</li>
+        <li><b>CS503</b> - Web Programming</li>
+        <li><b>CS504</b> - Operating Systems</li>
+        <li><b>CSL55</b> - Web Programming Laboratory</li>
+    </ul>
+
+    <h3>Faculty Details</h3>
+    <ul>
+        <li>Dr. Ravi Kumar (RK)</li>
+        <li>Prof. Anitha S (AS)</li>
+        <li>Prof. Naveen K (NK)</li>
+        <li>Dr. Manjunath P (MP)</li>
+    </ul>
+
+    <p>
+        Visit University Website:
+        <a href="https://jssstuniv.in" target="_blank">
+            JSS Science and Technology University
+        </a>
+    </p>
+</div>
+
+<br>
+
+<table>
+    <tr>
+        <th>Day/Time</th>
+        <th>9:00-10:00</th>
+        <th>10:00-11:00</th>
+        <th>11:00-11:15</th>
+        <th>11:15-12:15</th>
+        <th>12:15-1:15</th>
+        <th>1:15-2:00</th>
+        <th>2:00-3:00</th>
+        <th>3:00-4:00</th>
+    </tr>
+
+    <tr>
+        <td><b>Monday</b></td>
+        <td>CS501 (RK)</td>
+        <td>CS502 (AS)</td>
+        <td rowspan="5"><b>BREAK</b></td>
+        <td>CS503 (NK)</td>
+        <td>CS504 (MP)</td>
+        <td rowspan="5"><b>LUNCH</b></td>
+        <td colspan="2">CSL55 Lab</td>
+    </tr>
+
+    <tr>
+        <td><b>Tuesday</b></td>
+        <td>CS502 (AS)</td>
+        <td>CS501 (RK)</td>
+        <td>CS504 (MP)</td>
+        <td>CS503 (NK)</td>
+        <td colspan="2">Project Work</td>
+    </tr>
+
+    <tr>
+        <td><b>Wednesday</b></td>
+        <td>CS503 (NK)</td>
+        <td>CS504 (MP)</td>
+        <td>CS501 (RK)</td>
+        <td>CS502 (AS)</td>
+        <td colspan="2">CSL55 Lab</td>
+    </tr>
+
+    <tr>
+        <td><b>Thursday</b></td>
+        <td>CS504 (MP)</td>
+        <td>CS503 (NK)</td>
+        <td>CS502 (AS)</td>
+        <td>CS501 (RK)</td>
+        <td>Seminar</td>
+        <td>Mentoring</td>
+    </tr>
+
+    <tr>
+        <td><b>Friday</b></td>
+        <td>CS501 (RK)</td>
+        <td>CS502 (AS)</td>
+        <td>CS503 (NK)</td>
+        <td>CS504 (MP)</td>
+        <td colspan="2">Placement Training</td>
+    </tr>
+</table>
+
+<footer>
+    <p>&copy; 2026 Department of CSE | JSSSTU Mysuru</p>
+</footer>
+
+</body>
+</html>

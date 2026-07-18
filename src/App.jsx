@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import supabase from "./supabase";
+import cutoffsCsv from "./final_cutoffs.csv?raw";
 
 const categoryOptions = ["GM", "GMK", "GMR", "1G", "1K", "1R", "2AG", "2AK", "2AR", "2BG", "2BK", "2BR", "3AG", "3AK", "3AR", "3BG", "3BK", "3BR", "SCG", "SCK", "SCR", "STG", "STK", "STR"];
 const defaultBranchOptions = ["Computer Science", "Information Science", "Electronics", "Aeronautical & Aerospace", "Artificial Intelligence", "Data Science", "Cyber Security", "Robotics & Automation", "Biotechnology & Biomedical", "Chemical", "Civil", "Construction & Management", "Environmental", "Electrical", "Mechanical", "Industrial & Production", "Polymer Science", "Agricultural", "Automobile", "Petroleum", "Mining", "Marine", "Textile", "Design", "Planning (B.Plan)"];
@@ -36,14 +36,109 @@ const MIN_OPTIONS_COUNT = 24;
 const RESULTS_PER_PAGE = 20;
 const MATCH_PRIORITY_ORDER = { Difficult: 0, Safe: 1 };
 
-function normalizeCollegeCode(code) {
-  return String(code ?? "").trim().toUpperCase().replace(/\s+/g, "");
+/**
+ * Historical-style KCET Engg score→rank bands for the official 50:50 formula:
+ * totalPercent = (PCM/300)*50 + (KCET/180)*50
+ * These bands approximate recent-year GM trends (not official KEA data).
+ * Cutoff CSV must NOT be used to invent exam ranks — it only holds college closing ranks.
+ */
+const RANK_PREDICTION_BANDS = [
+  { min_percent: 95, max_percent: 100, predicted_rank: 350 },
+  { min_percent: 92, max_percent: 95, predicted_rank: 900 },
+  { min_percent: 90, max_percent: 92, predicted_rank: 1600 },
+  { min_percent: 87, max_percent: 90, predicted_rank: 2800 },
+  { min_percent: 85, max_percent: 87, predicted_rank: 4200 },
+  { min_percent: 82, max_percent: 85, predicted_rank: 6500 },
+  { min_percent: 80, max_percent: 82, predicted_rank: 9000 },
+  { min_percent: 77, max_percent: 80, predicted_rank: 12000 },
+  { min_percent: 75, max_percent: 77, predicted_rank: 15500 },
+  { min_percent: 72, max_percent: 75, predicted_rank: 21000 },
+  { min_percent: 70, max_percent: 72, predicted_rank: 28000 },
+  { min_percent: 67, max_percent: 70, predicted_rank: 38000 },
+  { min_percent: 65, max_percent: 67, predicted_rank: 48000 },
+  { min_percent: 62, max_percent: 65, predicted_rank: 62000 },
+  { min_percent: 60, max_percent: 62, predicted_rank: 78000 },
+  { min_percent: 55, max_percent: 60, predicted_rank: 100000 },
+  { min_percent: 50, max_percent: 55, predicted_rank: 130000 },
+  { min_percent: 45, max_percent: 50, predicted_rank: 160000 },
+  { min_percent: 40, max_percent: 45, predicted_rank: 190000 },
+  { min_percent: 0, max_percent: 40, predicted_rank: 220000 },
+];
+
+function parseCsv(text) {
+  const rows = [];
+  let current = "";
+  let row = [];
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (char === '"') {
+      if (inQuotes && text[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (char === "," && !inQuotes) {
+      row.push(current);
+      current = "";
+      continue;
+    }
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && text[i + 1] === "\n") i += 1;
+      if (current.length > 0 || row.length > 0) {
+        row.push(current);
+        rows.push(row);
+        row = [];
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (current.length > 0 || row.length > 0) {
+    row.push(current);
+    rows.push(row);
+  }
+  return rows;
 }
 
-function applyBranchFilter(query, selectedBranch) {
+function branchMatches(branchName, selectedBranch) {
+  const branchText = String(branchName ?? "").toLowerCase();
+  if (!branchText) return false;
   const keywords = branchKeywordMap[selectedBranch];
-  if (!keywords?.length) return query.ilike("branch", `%${selectedBranch}%`);
-  return query.or(keywords.map((keyword) => `branch.ilike.%${keyword}%`).join(","));
+  if (!keywords?.length) {
+    return branchText.includes(selectedBranch.toLowerCase());
+  }
+  return keywords.some((keyword) => branchText.includes(keyword.toLowerCase()));
+}
+
+function estimateRankFromPercent(totalPercent) {
+  const percentile = Math.min(100, Math.max(0, totalPercent));
+  const band = RANK_PREDICTION_BANDS.find(
+    (row) => percentile >= row.min_percent && percentile <= row.max_percent
+  );
+  if (!band) return null;
+
+  // Interpolate within the band so higher % inside a band gets a better (lower) rank.
+  const span = Math.max(0.0001, band.max_percent - band.min_percent);
+  const nextBetter = RANK_PREDICTION_BANDS.find((row) => row.min_percent >= band.max_percent);
+  const betterRank = nextBetter ? nextBetter.predicted_rank : Math.max(1, Math.floor(band.predicted_rank * 0.55));
+  const t = (percentile - band.min_percent) / span;
+  const predicted = Math.round(band.predicted_rank + (betterRank - band.predicted_rank) * t);
+
+  console.log("[KCET debug] rank bands lookup", {
+    totalPercent: percentile,
+    matchedBand: band,
+    betterRank,
+    interpolationT: Number(t.toFixed(4)),
+    predictedRank: predicted,
+  });
+
+  return Math.max(1, predicted);
 }
 
 function getMatchStrength(userRank, cutoffRank) {
@@ -59,6 +154,8 @@ function getMatchStrength(userRank, cutoffRank) {
 }
 
 export default function App() {
+  const [allCutoffs, setAllCutoffs] = useState([]);
+  const [dataError, setDataError] = useState("");
   const [rank, setRank] = useState("");
   const [pcmTotal, setPcmTotal] = useState("");
   const [kcetScore, setKcetScore] = useState("");
@@ -74,16 +171,41 @@ export default function App() {
   const [collegeSearch, setCollegeSearch] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [predictionError, setPredictionError] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
-    const loadDistricts = async () => {
-      const { data, error } = await supabase.from("cutoffs").select("district").not("district", "is", null).neq("district", "");
-      if (error) return;
-      const dbDistricts = Array.from(new Set((data ?? []).map((item) => item.district).filter(Boolean)));
-      setDistrictList(Array.from(new Set([...allDistrictOptions, ...dbDistricts])).sort((a, b) => a.localeCompare(b)));
-    };
-    loadDistricts();
+    try {
+      const parsedRows = parseCsv(cutoffsCsv);
+      const [headerRow, ...bodyRows] = parsedRows;
+      const headers = (headerRow ?? []).map((value) => value.trim().toLowerCase());
+      const normalizedRows = bodyRows
+        .map((cells) => {
+          const row = {};
+          headers.forEach((header, idx) => {
+            row[header] = String(cells[idx] ?? "").trim();
+          });
+          return row;
+        })
+        .filter((row) => row.branch && row.category && row.cutoff_rank);
+      setAllCutoffs(normalizedRows);
+      const csvDistricts = Array.from(new Set(normalizedRows.map((item) => item.district).filter(Boolean)));
+      setDistrictList(Array.from(new Set([...allDistrictOptions, ...csvDistricts])).sort((a, b) => a.localeCompare(b)));
+      setDataError("");
+      console.log("[KCET debug] CSV loaded", {
+        recordCount: normalizedRows.length,
+        sampleRows: normalizedRows.slice(0, 3),
+        sampleCutoffRanks: normalizedRows.slice(0, 5).map((row) => ({
+          college: row.college_name?.slice(0, 40),
+          branch: row.branch,
+          category: row.category,
+          cutoff_rank: row.cutoff_rank,
+        })),
+      });
+    } catch (error) {
+      console.error(error);
+      setDataError("Unable to read final_cutoffs.csv. Ensure src/final_cutoffs.csv exists and is valid CSV.");
+    }
   }, []);
 
   const filteredDistrictList = useMemo(
@@ -127,35 +249,37 @@ export default function App() {
     const numericRank = Number(rankOverride ?? rank);
     if (!numericRank || numericRank <= 0) {
       setResults([]);
+      setPredictionError("Enter a valid rank greater than 0.");
       return;
     }
     setLoading(true);
+    setPredictionError("");
     const selectedBranch = branch.trim();
     const selectedCategory = category.trim();
     const tier1LowerBound = numericRank * 0.7;
     const tier2UpperBound = numericRank * 1.1;
 
     try {
-      const fetchCutoffs = async (useCategoryFilter) => {
-        let windowQuery = supabase.from("cutoffs").select("*").gte("cutoff_rank", Math.floor(tier1LowerBound)).lte("cutoff_rank", Math.ceil(tier2UpperBound)).limit(120);
-        let safeExpansionQuery = supabase.from("cutoffs").select("*").gt("cutoff_rank", Math.ceil(tier2UpperBound)).order("cutoff_rank", { ascending: true }).limit(120);
-        windowQuery = applyBranchFilter(windowQuery, selectedBranch);
-        safeExpansionQuery = applyBranchFilter(safeExpansionQuery, selectedBranch);
-        if (useCategoryFilter) {
-          windowQuery = windowQuery.ilike("category", selectedCategory);
-          safeExpansionQuery = safeExpansionQuery.ilike("category", selectedCategory);
-        }
-        if (selectedDistricts.length > 0) {
-          windowQuery = windowQuery.in("district", selectedDistricts);
-          safeExpansionQuery = safeExpansionQuery.in("district", selectedDistricts);
-        }
-        const { data: windowData, error: windowError } = await windowQuery;
-        if (windowError) return { rows: [], error: windowError };
-        let rows = [...(windowData ?? [])];
-        if (rows.length < MIN_OPTIONS_COUNT) {
-          const { data: extraData } = await safeExpansionQuery;
-          rows = [...rows, ...(extraData ?? [])];
-        }
+      const fetchCutoffs = (useCategoryFilter) => {
+        let rows = allCutoffs.filter((item) => {
+          const cutoffRank = Number(item.cutoff_rank);
+          if (!Number.isFinite(cutoffRank)) return false;
+          if (useCategoryFilter && item.category !== selectedCategory) return false;
+          if (selectedDistricts.length > 0 && !selectedDistricts.includes(item.district)) return false;
+          if (!branchMatches(item.branch, selectedBranch)) return false;
+          return true;
+        });
+
+        const inWindow = rows.filter((item) => {
+          const cutoffRank = Number(item.cutoff_rank);
+          return cutoffRank >= Math.floor(tier1LowerBound) && cutoffRank <= Math.ceil(tier2UpperBound);
+        });
+        const expanded = rows
+          .filter((item) => Number(item.cutoff_rank) > Math.ceil(tier2UpperBound))
+          .sort((a, b) => Number(a.cutoff_rank) - Number(b.cutoff_rank))
+          .slice(0, 400);
+
+        rows = inWindow.length >= MIN_OPTIONS_COUNT ? inWindow : [...inWindow, ...expanded];
         return { rows, error: null };
       };
 
@@ -163,32 +287,52 @@ export default function App() {
       if (strictResult.error) {
         console.error(strictResult.error);
         setResults([]);
+        setPredictionError("Unable to load colleges from CSV.");
         return;
       }
-      const mergedData = strictResult.rows.length > 0 ? strictResult.rows : (await fetchCutoffs(false)).rows;
+      let mergedData = strictResult.rows;
+      if (mergedData.length === 0) {
+        const relaxedResult = await fetchCutoffs(false);
+        if (relaxedResult.error) {
+          console.error(relaxedResult.error);
+          setResults([]);
+          setPredictionError("Unable to load colleges from CSV.");
+          return;
+        }
+        mergedData = relaxedResult.rows;
+      }
       const uniqueByCutoff = new Map();
       for (const item of mergedData) {
         const key = `${item.college_code}-${item.branch}-${item.category}-${item.cutoff_rank}`;
         if (!uniqueByCutoff.has(key)) uniqueByCutoff.set(key, item);
       }
       const prioritizedData = Array.from(uniqueByCutoff.values()).sort((a, b) => Number(a.cutoff_rank) - Number(b.cutoff_rank));
-      const collegeCodes = Array.from(new Set(prioritizedData.map((item) => normalizeCollegeCode(item.college_code)).filter(Boolean)));
-      let collegeNameByCode = {};
-      if (collegeCodes.length > 0) {
-        const { data: collegeRows } = await supabase.from("colleges").select("college_code, college_name").limit(5000);
-        collegeNameByCode = (collegeRows ?? []).reduce((acc, row) => {
-          const normalizedCode = normalizeCollegeCode(row.college_code);
-          if (normalizedCode) acc[normalizedCode] = row.college_name;
-          return acc;
-        }, {});
+      if (prioritizedData.length === 0) {
+        setResults([]);
+        setPredictionError("No colleges match your rank, branch, category, and district filters. Try clearing districts or choosing another branch.");
+        return;
       }
+
+      console.log("[KCET debug] college recommendations", {
+        userRank: numericRank,
+        category: selectedCategory,
+        branch: selectedBranch,
+        matchedCount: prioritizedData.length,
+        showing: Math.min(MIN_OPTIONS_COUNT, prioritizedData.length),
+        sample: prioritizedData.slice(0, 3).map((item) => ({
+          college: item.college_name,
+          branch: item.branch,
+          category: item.category,
+          cutoff_rank: item.cutoff_rank,
+        })),
+      });
 
       setResults(
         prioritizedData.slice(0, MIN_OPTIONS_COUNT).map((item) => {
           const cutoffRank = Number(item.cutoff_rank);
           return {
             collegeCode: item.college_code,
-            collegeName: collegeNameByCode[normalizeCollegeCode(item.college_code)] ?? item.college_name ?? item.college_code ?? "Unknown College",
+            collegeName: item.college_name ?? item.college_code ?? "Unknown College",
             district: item.district ?? "",
             branch: item.branch,
             category: item.category,
@@ -214,21 +358,25 @@ export default function App() {
     setCalculatorLoading(true);
     setCalculatorError("");
     try {
-      const totalPercent = (pcmValue / 300) * 50 + (kcetValue / 180) * 50;
+      const pcmContribution = (pcmValue / 300) * 50;
+      const kcetContribution = (kcetValue / 180) * 50;
+      const totalPercent = pcmContribution + kcetContribution;
+      console.log("[KCET debug] input marks", {
+        pcmTotal: pcmValue,
+        kcetScore: kcetValue,
+        pcmContribution: Number(pcmContribution.toFixed(4)),
+        kcetContribution: Number(kcetContribution.toFixed(4)),
+        totalPercent: Number(totalPercent.toFixed(4)),
+      });
       setCalculatedPercent(totalPercent);
-      const { data, error } = await supabase.from("rank_predictions").select("predicted_rank").lte("min_percent", totalPercent).gte("max_percent", totalPercent).limit(1);
-      if (error) {
-        setCalculatorError("Unable to fetch estimated rank right now.");
-        setEstimatedRank(null);
-        return;
-      }
-      const predicted = data?.[0]?.predicted_rank ?? null;
+      const predicted = estimateRankFromPercent(totalPercent);
       if (!predicted) {
-        setCalculatorError("No estimated rank found for this score range.");
+        setCalculatorError("Unable to estimate rank for this score range.");
         setEstimatedRank(null);
         return;
       }
-      setEstimatedRank(Number(predicted));
+      console.log("[KCET debug] predicted rank result", { totalPercent, predicted });
+      setEstimatedRank(predicted);
     } finally {
       setCalculatorLoading(false);
     }
@@ -245,6 +393,12 @@ export default function App() {
       <div className="mx-auto max-w-7xl px-4 py-8 md:px-8 md:py-10">
         <h1 className="text-3xl font-bold tracking-tight text-slate-900 md:text-4xl">KCET PREDICTOR</h1>
         <p className="mt-2 text-slate-600">Estimate your KCET rank, tune filters, and explore best-fit colleges instantly.</p>
+        {dataError ? (
+          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
+            <p className="font-semibold">CSV data problem</p>
+            <p className="mt-1">{dataError}</p>
+          </div>
+        ) : null}
 
         <section className="mt-8 rounded-2xl border border-white/40 bg-white/40 p-6 shadow-xl shadow-indigo-100 backdrop-blur-xl md:p-8">
           <div className="grid gap-4 md:grid-cols-2">
@@ -331,8 +485,11 @@ export default function App() {
               Priority: Difficult → Safe
             </p>
           </div>
+          {predictionError ? <p className="mb-3 text-sm font-medium text-rose-600">{predictionError}</p> : null}
           {displayedResults.length === 0 && !loading ? (
-            <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">No colleges found for current filters.</div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">
+              {predictionError || "No colleges found for current filters. Enter a rank and click Run Prediction."}
+            </div>
           ) : null}
           <div className="flex flex-col gap-4">
             <AnimatePresence>
