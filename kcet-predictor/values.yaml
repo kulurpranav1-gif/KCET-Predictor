@@ -1,9 +1,9 @@
 replicaCount: 1
 
 image:
-  repository: kcet-predictor
+  repository: ghcr.io/kulurpranav1-gif/kcet-predictor
   tag: latest
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 service:
   type: NodePort
